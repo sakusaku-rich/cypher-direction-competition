@@ -27,6 +27,7 @@ class QueryCorrector:
     node_pattern = re.compile(r"\(.+?\)")
     path_pattern = re.compile(r"\(.*\).*-.*-.*\(.*\)")
     node_relation_node_pattern = re.compile(r"(\()+(?P<left_node>[^()]*?)\)(?P<relation>.*?)\((?P<right_node>[^()]*?)(\))+")
+    relation_type_pattern = re.compile(r":(?P<relation_type>.+?)?(\{.+\})?]")
     
     def __init__(self, schemas: list[Schema]):
         """
@@ -42,9 +43,9 @@ class QueryCorrector:
         
         """
         node = re.sub(self.property_pattern, "", node)
-        node = node.replace(" ", "")
         node = node.replace("(", "")
         node = node.replace(")", "")
+        node = node.strip()
         return node
 
     def detect_node_variables(self, query: str) -> dict[str, list[str]]:
@@ -57,7 +58,6 @@ class QueryCorrector:
         res = {}
         for node in nodes:
             parts = node.split(":")
-            parts = [p.replace("`", "") for p in parts]
             if parts == "":
                 continue
             variable = parts[0]
@@ -111,7 +111,7 @@ class QueryCorrector:
             labels = splitted[1:]
         return labels
     
-    def verify_schema(self, from_node_labels: list[str], relation_type: str, to_node_labels: list[str]) -> bool:
+    def verify_schema(self, from_node_labels: list[str], relation_types: list[str], to_node_labels: list[str]) -> bool:
         """
         Args:
             from_node_labels: labels of the from node
@@ -120,12 +120,28 @@ class QueryCorrector:
         """
         valid_schemas = self.schemas
         if from_node_labels != []:
+            from_node_labels = [label.strip('`') for label in from_node_labels]
             valid_schemas = [schema for schema in valid_schemas if schema[0] in from_node_labels]
         if to_node_labels != []:
+            to_node_labels = [label.strip('`') for label in to_node_labels]
             valid_schemas = [schema for schema in valid_schemas if schema[2] in to_node_labels]
-        if relation_type is not None:
-            valid_schemas = [schema for schema in valid_schemas if schema[1] == relation_type]
+        if relation_types != []:
+            relation_types = [type.strip('`') for type in relation_types]
+            valid_schemas = [schema for schema in valid_schemas if schema[1] in relation_types]
         return valid_schemas != []
+    
+    def detect_relation_types(self, str_relation: str) -> tuple[str, list[str]]:
+        """
+        Args:
+            str_relation: relation in string format
+        """
+        relation_direction = self.judge_direction(str_relation)        
+        relation_type = self.relation_type_pattern.search(str_relation)
+        if relation_type is None or relation_type.group('relation_type') is None:
+            return relation_direction, []
+        relation_types = [t.strip().strip('!') for t in relation_type.group('relation_type').split("|")]
+        return relation_direction, relation_types
+        
 
     def correct_query(self, query: str) -> str:
         """
@@ -145,20 +161,18 @@ class QueryCorrector:
                 match_dict = match_res.groupdict()
                 left_node_labels = self.detect_labels(match_dict["left_node"], node_variable_dict)
                 right_node_labels = self.detect_labels(match_dict["right_node"], node_variable_dict)
-                relation_direction = self.judge_direction(match_dict["relation"])
-                relation_type = re.search(r":\w+\*?", match_dict["relation"].replace("`", ""))
-                relation_type = relation_type.group()[1:] if relation_type is not None else None
                 end_idx = start_idx + 4 + len(match_dict["left_node"]) + len(match_dict["relation"]) + len(match_dict["right_node"])
                 original_partial_path = original_path[start_idx:end_idx+1]
-
-                if relation_type is not None and relation_type[-1] == "*":
+                relation_direction, relation_types = self.detect_relation_types(match_dict["relation"])
+                
+                if relation_types != [] and ''.join(relation_types).find('*') != -1:
                     start_idx += len(match_dict["left_node"]) + len(match_dict["relation"]) + 2
                     continue
                 
                 if relation_direction == "OUTGOING":
-                    is_legal = self.verify_schema(left_node_labels, relation_type, right_node_labels)
+                    is_legal = self.verify_schema(left_node_labels, relation_types, right_node_labels)
                     if not is_legal:
-                        is_legal = self.verify_schema(right_node_labels, relation_type, left_node_labels)
+                        is_legal = self.verify_schema(right_node_labels, relation_types, left_node_labels)
                         if is_legal:
                             corrected_relation = "<" + match_dict["relation"][:-1]
                             corrected_partial_path = original_partial_path.replace(match_dict["relation"], corrected_relation)
@@ -166,9 +180,9 @@ class QueryCorrector:
                         else:
                             return ""
                 elif relation_direction == "INCOMING":
-                    is_legal = self.verify_schema(right_node_labels, relation_type, left_node_labels)
+                    is_legal = self.verify_schema(right_node_labels, relation_types, left_node_labels)
                     if not is_legal:
-                        is_legal = self.verify_schema(left_node_labels, relation_type, right_node_labels)
+                        is_legal = self.verify_schema(left_node_labels, relation_types, right_node_labels)
                         if is_legal:
                             corrected_relation = match_dict["relation"][1:] + ">"
                             corrected_partial_path = original_partial_path.replace(match_dict["relation"], corrected_relation)
@@ -176,8 +190,8 @@ class QueryCorrector:
                         else:
                             return ""
                 else:
-                    is_legal = self.verify_schema(left_node_labels, relation_type, right_node_labels)
-                    is_legal |= self.verify_schema(right_node_labels, relation_type, left_node_labels)
+                    is_legal = self.verify_schema(left_node_labels, relation_types, right_node_labels)
+                    is_legal |= self.verify_schema(right_node_labels, relation_types, left_node_labels)
                     if not is_legal:
                         return ""
                 
