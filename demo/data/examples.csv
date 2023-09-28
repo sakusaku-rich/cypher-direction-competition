@@ -1,4 +1,6 @@
 statement,schema,correct_query
+"MATCH p=((n:`Some Label`)-[:`SOME REL TYPE üäß`]->(m:`Sömé Øther Læbel`)) RETURN p","(Some Label, SOME REL TYPE üäß, Sömé Øther Læbel)","MATCH p=((n:`Some Label`)-[:`SOME REL TYPE üäß`]->(m:`Sömé Øther Læbel`)) RETURN p"
+"MATCH p=((n:`Some Label`)<-[:`SOME REL TYPE üäß`]-(m:`Sömé Øther Læbel`)) RETURN p","(Some Label, SOME REL TYPE üäß, Sömé Øther Læbel)","MATCH p=((n:`Some Label`)-[:`SOME REL TYPE üäß`]->(m:`Sömé Øther Læbel`)) RETURN p"
 "MATCH (p:Person)-[:KNOWS]->(:Person) RETURN p, count(*) AS count","(Person, KNOWS, Person), (Person, WORKS_AT, Organization)","MATCH (p:Person)-[:KNOWS]->(:Person) RETURN p, count(*) AS count"
 "MATCH (p:Person)<-[:KNOWS]-(:Person) RETURN p, count(*) AS count","(Person, KNOWS, Person), (Person, WORKS_AT, Organization)","MATCH (p:Person)<-[:KNOWS]-(:Person) RETURN p, count(*) AS count"
 "MATCH (p:Person {id:""Foo""})<-[:WORKS_AT]-(o:Organization) RETURN o.name AS name","(Person, KNOWS, Person), (Person, WORKS_AT, Organization)","MATCH (p:Person {id:""Foo""})-[:WORKS_AT]->(o:Organization) RETURN o.name AS name"
